@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flame/game.dart';
+import 'package:flame/components.dart';
 import 'game/space_invaders_game.dart';
 
 void main() {
@@ -47,8 +48,14 @@ class _GameScreenState extends State<GameScreen> {
             onPanUpdate: (details) {
               _game.onExternalPanUpdate(details.delta.dx);
             },
-            onTap: () {
-              _game.onExternalTap();
+            onTapUp: (details) {
+              final box = context.findRenderObject() as RenderBox?;
+              if (box != null) {
+                final localPos = box.globalToLocal(details.globalPosition);
+                _game.onExternalTapAt(
+                  Vector2(localPos.dx, localPos.dy),
+                );
+              }
             },
             child: GameWidget(
               game: _game,

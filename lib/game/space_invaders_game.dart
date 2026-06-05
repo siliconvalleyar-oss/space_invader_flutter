@@ -14,6 +14,8 @@ import '../components/explosion.dart';
 import '../components/starfield.dart';
 import '../components/collision_utils.dart';
 import '../components/power_up.dart';
+import '../components/main_menu.dart';
+import '../components/level_select.dart';
 import '../utils/high_score_manager.dart';
 
 /// Level configuration for progressive difficulty.
@@ -48,6 +50,9 @@ class LevelConfig {
     LevelConfig(level: 7, gridColumns: 7, gridRows: 5, moveInterval: 0.4, fireInterval: 0.6, stepSize: 30),
   ];
 }
+
+/// Game state machine.
+enum GameState { menu, levelSelect, playing }
 
 /// Main Space Invaders game class.
 class SpaceInvadersGame extends FlameGame with KeyboardEvents {
@@ -90,9 +95,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   TextComponent? highScoreText;
   TextComponent? powerUpHud;
   TextComponent? gameOverText;
-  TextComponent? startText;
   bool isGameOver = false;
   bool isGameStarted = false;
+
+  // Game state management
+  GameState _gameState = GameState.menu;
+  int unlockedLevel = 0;
+  late MainMenu mainMenu;
+  late LevelSelect levelSelect;
+  int get highScore => HighScoreManager.highScore;
 
   @override
   Color backgroundColor() => const Color(0xFF000000);
@@ -109,10 +120,11 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     starfield.priority = -100;
     add(starfield);
 
-    // Player
+    // Player (hidden until game starts)
     player = Player();
     player.position = Vector2(size.x / 2, size.y - 80);
     player.priority = 50;
+    player.visible = false;
     add(player);
 
     // Precompute player alpha map
@@ -121,11 +133,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         _playerAlpha = await AlphaMap.fromSprite(player.sprite!);
       }
     } catch (_) {}
-
-    // Start level
-    invaderGrid = null;
-    boss = null;
-    _startLevel(0);
 
     // Score HUD
     scoreText = TextComponent(
@@ -156,16 +163,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     add(levelText!);
 
     // High Score HUD (below score)
-    final hs = HighScoreManager.highScore;
     highScoreText = TextComponent(
-      text: hs > 0 ? 'HI: $hs' : '',
+      text: '',
       textRenderer: _buildTextRenderer(Colors.purpleAccent, 14),
       position: Vector2(10, 32),
       priority: 100,
     );
     add(highScoreText!);
 
-    // Power-up HUD (below high score)
+    // Power-up HUD
     powerUpHud = TextComponent(
       text: '',
       textRenderer: _buildTextRenderer(Colors.white70, 12),
@@ -174,18 +180,10 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     );
     add(powerUpHud!);
 
-    // Start prompt
-    final startMsg = hs > 0
-        ? '🚀 SPACE INVADERS\n\nHI: $hs\n\nTap to Start'
-        : '🚀 SPACE INVADERS\n\nTap to Start';
-    startText = TextComponent(
-      text: startMsg,
-      textRenderer: _buildTextRenderer(Colors.cyanAccent, 28),
-      position: Vector2(size.x / 2, size.y / 2),
-      anchor: Anchor.center,
-      priority: 200,
-    );
-    add(startText!);
+    // Pre-create level (hidden behind menu) so everything is ready when game starts
+    invaderGrid = null;
+    boss = null;
+    _startLevel(0);
 
     // Game Over text
     gameOverText = TextComponent(
@@ -196,6 +194,20 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       priority: 200,
     );
     add(gameOverText!);
+
+    // Main menu (shown first) — hides the pre-created level
+    mainMenu = MainMenu()
+      ..size = size
+      ..priority = 500;
+    add(mainMenu);
+
+    // Level select (hidden until called)
+    levelSelect = LevelSelect()
+      ..size = size
+      ..priority = 500;
+
+    // Hide player until game starts
+    player.visible = false;
   }
 
   TextPaint _buildTextRenderer(Color color, [double size = 20]) {
@@ -296,7 +308,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   @override
   void update(double dt) {
     super.update(dt);
-    if (!isGameStarted || isGameOver || isTransitioning) return;
+    if (_gameState != GameState.playing || isGameOver || isTransitioning) return;
 
     // Auto-fire
     fireTimer += dt;
@@ -568,6 +580,59 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     }
   }
 
+  /// Start a new game from the main menu (level 0).
+  void startGameFromMenu() {
+    _playSound('shoot.wav');
+    _gameState = GameState.playing;
+    remove(mainMenu);
+    _doStartGame();
+  }
+
+  /// Show the level select screen.
+  void showLevelSelect() {
+    _playSound('level_up.wav');
+    _gameState = GameState.levelSelect;
+    remove(mainMenu);
+    add(levelSelect);
+  }
+
+  /// Return to the main menu.
+  void showMainMenu() {
+    _playSound('shoot.wav');
+    _gameState = GameState.menu;
+    remove(levelSelect);
+    add(mainMenu);
+  }
+
+  /// Start a game from the level select at a specific level.
+  void startLevelFromSelect(int levelIndex) {
+    _playSound('shoot.wav');
+    _gameState = GameState.playing;
+    remove(levelSelect);
+    _doStartGame();
+    // Override to start at selected level
+    currentLevel = levelIndex;
+    _startLevel(levelIndex);
+  }
+
+  /// Internal: set up the game for playing.
+  void _doStartGame() {
+    isGameStarted = true;
+    player.visible = true;
+    // Level already pre-created in onLoad(), no need to recreate
+    // Just reset power-up state and game vars
+    score = 0;
+    lives = 3;
+    invulnerabilityTimer = 0.0;
+    fireTimer = 0.0;
+    _gameJustStarted = true;
+    scoreText?.text = 'SCORE: 0';
+    livesText?.text = 'LIVES: 3';
+    levelText?.text = 'LEVEL 1';
+    // Ensure the grid is reset to level 0
+    _resetLevel(0);
+  }
+
   /// Show a brief floating text label for power-up collection.
   void _showPowerUpLabel(String text, Color color) {
     final label = TextComponent(
@@ -711,6 +776,29 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     gameOverText?.text = '💀 GAME OVER\n\nScore: $score$hsText\n\nTap to Restart';
   }
 
+  /// Reset the currently loaded level without recreating components.
+  void _resetLevel(int levelIndex) {
+    currentLevel = levelIndex;
+    final config = LevelConfig.levels[levelIndex.clamp(0, LevelConfig.levels.length - 1)];
+
+    if (invaderGrid != null) {
+      invaderGrid!.reset();
+    }
+    if (boss != null && config.isBossLevel) {
+      boss!.hitPoints = config.bossHp;
+      boss!.visible = true;
+    } else if (boss != null) {
+      boss!.visible = false;
+    }
+
+    _enemyAlphas.clear();
+    _bossAlpha = null;
+
+    levelText?.text = 'LEVEL ${config.level}';
+    starfield.setSpeedLevel(config.level);
+    isTransitioning = false;
+  }
+
   void _resetGame() {
     _clearBullets();
     player.position = Vector2(size.x / 2, size.y - 80);
@@ -720,7 +808,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     lives = 3;
     isGameOver = false;
     gameOverText?.text = '';
-    startText?.text = '';
     isGameStarted = true;
     isTransitioning = false;
     _gameJustStarted = true;
@@ -733,28 +820,31 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     if (invaderGrid != null) invaderGrid!.frozen = false;
     if (boss != null) boss!.frozen = false;
     _powerUps.clear();
-    _startLevel(0);
-  }
-
-  void _startGame() {
-    isGameStarted = true;
-    startText?.text = '';
+    _resetLevel(0);
   }
 
   void onExternalPanUpdate(double dx) {
-    if (!isGameStarted) _startGame();
-    if (isGameOver) return;
+    if (_gameState != GameState.playing || isGameOver) return;
     player.position.x += dx;
     player.position.x = player.position.x.clamp(30.0, size.x - 30.0);
   }
 
-  void onExternalTap() {
-    if (!isGameStarted) { _startGame(); return; }
-    if (isGameOver) _resetGame();
+  void onExternalTapAt(Vector2 position) {
+    switch (_gameState) {
+      case GameState.menu:
+        mainMenu.handleTap(position);
+        break;
+      case GameState.levelSelect:
+        levelSelect.handleTap(position);
+        break;
+      case GameState.playing:
+        if (isGameOver) _resetGame();
+        break;
+    }
   }
 
   void onExternalFireTap() {
-    if (!isGameStarted) { _startGame(); return; }
+    if (_gameState != GameState.playing) return;
     if (isGameOver) { _resetGame(); return; }
     _spawnPlayerBullet();
     _gameJustStarted = false;
@@ -762,16 +852,28 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
   @override
   KeyEventResult onKeyEvent(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
-    if (!isGameStarted) _startGame();
-    if (isGameOver) return KeyEventResult.handled;
+    if (_gameState == GameState.menu) {
+      if (keysPressed.contains(LogicalKeyboardKey.space) || keysPressed.contains(LogicalKeyboardKey.enter)) {
+        startGameFromMenu();
+      }
+      return KeyEventResult.handled;
+    }
+    if (_gameState == GameState.levelSelect) {
+      return KeyEventResult.handled;
+    }
+    if (_gameState != GameState.playing) return KeyEventResult.handled;
+    if (isGameOver) {
+      if (keysPressed.contains(LogicalKeyboardKey.space) || keysPressed.contains(LogicalKeyboardKey.enter)) {
+        _resetGame();
+      }
+      return KeyEventResult.handled;
+    }
     const speed = 300.0;
     if (keysPressed.contains(LogicalKeyboardKey.arrowLeft) || keysPressed.contains(LogicalKeyboardKey.keyA))
       player.position.x -= speed * 0.016;
     if (keysPressed.contains(LogicalKeyboardKey.arrowRight) || keysPressed.contains(LogicalKeyboardKey.keyD))
       player.position.x += speed * 0.016;
-    if (keysPressed.contains(LogicalKeyboardKey.space) && isGameOver) _resetGame();
-    if (keysPressed.contains(LogicalKeyboardKey.space) && !isGameStarted) _startGame();
-    if (keysPressed.contains(LogicalKeyboardKey.space) && isGameStarted && !isGameOver) {
+    if (keysPressed.contains(LogicalKeyboardKey.space) || keysPressed.contains(LogicalKeyboardKey.enter)) {
       _spawnPlayerBullet();
     }
     player.position.x = player.position.x.clamp(30.0, size.x - 30.0);
@@ -784,6 +886,10 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     livesText?.position = Vector2(size.x - 120, 10);
     levelText?.position = Vector2(size.x / 2, 10);
     gameOverText?.position = Vector2(size.x / 2, size.y / 2 - 20);
-    startText?.position = Vector2(size.x / 2, size.y / 2);
+    // Update menu and level select sizes
+    if (_gameState == GameState.menu || _gameState == GameState.levelSelect) {
+      mainMenu.size = size;
+      levelSelect.size = size;
+    }
   }
 }
