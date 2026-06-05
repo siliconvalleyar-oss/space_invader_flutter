@@ -76,6 +76,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   // Power-up state
   double shieldTimer = 0.0;
   double tripleShotTimer = 0.0;
+  double freezeTimer = 0.0;
+  double spreadShotTimer = 0.0;
   static const double powerUpDuration = 6.0;
   final List<PowerUp> _powerUps = [];
 
@@ -86,6 +88,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   TextComponent? livesText;
   TextComponent? levelText;
   TextComponent? highScoreText;
+  TextComponent? powerUpHud;
   TextComponent? gameOverText;
   TextComponent? startText;
   bool isGameOver = false;
@@ -161,6 +164,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       priority: 100,
     );
     add(highScoreText!);
+
+    // Power-up HUD (below high score)
+    powerUpHud = TextComponent(
+      text: '',
+      textRenderer: _buildTextRenderer(Colors.white70, 12),
+      position: Vector2(10, 52),
+      priority: 100,
+    );
+    add(powerUpHud!);
 
     // Start prompt
     final startMsg = hs > 0
@@ -262,6 +274,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       _triggerVictory();
       return;
     }
+    // Reset power-up timers on level transition for fairness
+    freezeTimer = 0.0;
+    shieldTimer = 0.0;
+    tripleShotTimer = 0.0;
+    spreadShotTimer = 0.0;
+    player.shieldActive = false;
     _playSound('level_up.wav');
     _startLevel(nextIndex);
   }
@@ -304,6 +322,16 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     if (tripleShotTimer > 0) {
       tripleShotTimer -= dt;
     }
+    if (freezeTimer > 0) {
+      freezeTimer -= dt;
+      if (freezeTimer <= 0) {
+        if (invaderGrid != null) invaderGrid!.frozen = false;
+        if (boss != null) boss!.frozen = false;
+      }
+    }
+    if (spreadShotTimer > 0) {
+      spreadShotTimer -= dt;
+    }
     // Clean up collected/expired power-ups
     _powerUps.removeWhere((p) => !p.visible);
 
@@ -313,6 +341,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
     scoreText?.text = 'SCORE: $score';
     livesText?.text = 'LIVES: $lives';
+    _updatePowerUpHud();
   }
 
   void _checkCollisions() {
@@ -422,7 +451,19 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       HapticFeedback.selectionClick();
     }
 
-    if (tripleShotTimer > 0) {
+    if (spreadShotTimer > 0) {
+      // Spread shot: 5 bullets in wide fan
+      final offsets = [-24.0, -12.0, 0.0, 12.0, 24.0];
+      for (final offset in offsets) {
+        final bullet = Bullet(
+          position: Vector2(player.position.x + offset, player.position.y - 20),
+          isPlayerBullet: true,
+        );
+        bullet.priority = 60;
+        playerBullets.add(bullet);
+        add(bullet);
+      }
+    } else if (tripleShotTimer > 0) {
       // Triple shot: 3 bullets in spread pattern
       final offsets = [-12.0, 0.0, 12.0];
       for (final offset in offsets) {
@@ -466,11 +507,16 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     add(explosion);
   }
 
-  /// Spawn a power-up with 20% chance when an enemy is destroyed.
+  /// Spawn a power-up when an enemy is destroyed.
+  /// Chance decreases in higher levels for balanced difficulty.
   void _maybeSpawnPowerUp(Vector2 position) {
-    if (Random().nextDouble() > 0.2) return;
+    final chance = _powerUpChance();
+    if (Random().nextDouble() > chance) return;
 
-    final types = [PowerUpType.shield, PowerUpType.triple, PowerUpType.extraLife];
+    final types = [
+      PowerUpType.shield, PowerUpType.triple, PowerUpType.extraLife,
+      PowerUpType.freeze, PowerUpType.spread, PowerUpType.bomb,
+    ];
     final type = types[Random().nextInt(types.length)];
 
     final pu = PowerUp(position: position, type: type);
@@ -479,9 +525,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     add(pu);
   }
 
+  /// Returns power-up spawn probability based on current level.
+  /// Higher levels = lower chance (more challenge, more rewarding).
+  double _powerUpChance() {
+    return (0.28 - currentLevel * 0.025).clamp(0.10, 0.28);
+  }
+
   /// Handle power-up collection by the player.
   void _collectPowerUp(PowerUp pu) {
-    _playSound('level_up.wav');
+    _playPowerUpSound(pu.type);
     HapticFeedback.lightImpact();
 
     switch (pu.type) {
@@ -498,6 +550,20 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         lives++;
         _showPowerUpLabel('+1 UP', const Color(0xFF44FF44));
         livesText?.text = 'LIVES: $lives';
+        break;
+      case PowerUpType.freeze:
+        freezeTimer = powerUpDuration;
+        if (invaderGrid != null) invaderGrid!.frozen = true;
+        if (boss != null) boss!.frozen = true;
+        _showPowerUpLabel('❄️ FREEZE', const Color(0xFF88CCFF));
+        break;
+      case PowerUpType.spread:
+        spreadShotTimer = powerUpDuration;
+        _showPowerUpLabel('🔥 SPREAD', const Color(0xFFFF8800));
+        break;
+      case PowerUpType.bomb:
+        _activateBomb();
+        _showPowerUpLabel('💥 BOMB', const Color(0xFFFF2200));
         break;
     }
   }
@@ -529,9 +595,73 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     });
   }
 
+  /// Show remaining time of active power-ups on the HUD.
+  void _updatePowerUpHud() {
+    final parts = <String>[];
+    if (shieldTimer > 0) parts.add('🛡️${shieldTimer.toStringAsFixed(1)}s');
+    if (tripleShotTimer > 0) parts.add('🔱${tripleShotTimer.toStringAsFixed(1)}s');
+    if (spreadShotTimer > 0) parts.add('🔥${spreadShotTimer.toStringAsFixed(1)}s');
+    if (freezeTimer > 0) parts.add('❄️${freezeTimer.toStringAsFixed(1)}s');
+    powerUpHud?.text = parts.isNotEmpty ? parts.join('  ') : '';
+  }
+
+  /// Destroy all enemies on screen instantly with explosions.
+  void _activateBomb() {
+    if (invaderGrid != null) {
+      for (final enemy in invaderGrid!.enemies) {
+        if (enemy.visible) {
+          enemy.visible = false;
+          score += 10;
+          _spawnExplosion(enemy.position + invaderGrid!.position, const Color(0xFFFF6644));
+        }
+      }
+    }
+    if (boss != null && boss!.visible) {
+      boss!.visible = false;
+      score += 50;
+      _spawnExplosion(boss!.position, const Color(0xFFFFAA00));
+      _spawnExplosion(boss!.position + Vector2(-15, -10), const Color(0xFFFF6644));
+      _spawnExplosion(boss!.position + Vector2(15, 10), const Color(0xFFFFAA00));
+    }
+    _playSound('explosion.wav');
+    HapticFeedback.heavyImpact();
+  }
+
+  /// Play a sound file from assets/sounds.
   void _playSound(String name) {
     try {
       FlameAudio.play('sounds/$name');
+    } catch (_) {}
+  }
+
+  /// Play the power-up collection sound with a pitch based on power-up type.
+  /// Uses setPlaybackRate on the AudioPlayer to create different tones.
+  void _playPowerUpSound(PowerUpType type) {
+    try {
+      double pitch;
+      switch (type) {
+        case PowerUpType.shield:
+          pitch = 0.75;   // low, bassy — solid defense
+          break;
+        case PowerUpType.triple:
+          pitch = 1.0;    // normal
+          break;
+        case PowerUpType.extraLife:
+          pitch = 1.25;   // higher, bright — celebratory
+          break;
+        case PowerUpType.freeze:
+          pitch = 0.65;   // lowest — icy, cold
+          break;
+        case PowerUpType.spread:
+          pitch = 0.9;    // slightly lower — warm
+          break;
+        case PowerUpType.bomb:
+          pitch = 1.5;    // highest — intense burst
+          break;
+      }
+      FlameAudio.play('sounds/level_up.wav').then((player) {
+        player?.setPlaybackRate(pitch);
+      });
     } catch (_) {}
   }
 
@@ -597,7 +727,11 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     // Reset power-up state
     shieldTimer = 0.0;
     tripleShotTimer = 0.0;
+    freezeTimer = 0.0;
+    spreadShotTimer = 0.0;
     player.shieldActive = false;
+    if (invaderGrid != null) invaderGrid!.frozen = false;
+    if (boss != null) boss!.frozen = false;
     _powerUps.clear();
     _startLevel(0);
   }

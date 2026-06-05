@@ -12,6 +12,17 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   final int rows;
   final List<Enemy> enemies = [];
 
+  /// Whether enemy movement is frozen by a power-up.
+  bool _frozen = false;
+  bool get frozen => _frozen;
+  set frozen(bool value) {
+    _frozen = value;
+    // Propagate frozen state to all enemies for visual effect
+    for (final enemy in enemies) {
+      enemy.frozen = value;
+    }
+  }
+
   GridDirection _currentDirection = GridDirection.right;
   GridDirection _lastHorizontal = GridDirection.right;
 
@@ -67,6 +78,20 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     super.update(dt);
     if (!gameRef.isGameStarted || gameRef.isGameOver) return;
 
+    // Freeze: don't move, but still allow firing
+    if (frozen) {
+      _fireTimer += dt;
+      // While frozen, enemies fire more often (panic!)
+      final activeEnemies = enemies.where((e) => e.visible).length;
+      final totalEnemies = columns * rows;
+      final speedFactor = 1.0 + (1.0 - activeEnemies / totalEnemies) * 0.5;
+      if (_fireTimer >= (_fireInterval * 0.7) / speedFactor) {
+        _fireTimer = 0.0;
+        _fireFromLowestRow();
+      }
+      return;
+    }
+
     final activeEnemies = enemies.where((e) => e.visible).length;
     final totalEnemies = columns * rows;
     final speedFactor = 1.0 + (1.0 - activeEnemies / totalEnemies) * 0.5;
@@ -113,24 +138,28 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     _fireTimer += dt;
     if (_fireTimer >= _fireInterval / speedFactor) {
       _fireTimer = 0.0;
+      _fireFromLowestRow();
+    }
+  }
 
-      final columnLowest = <int, Enemy>{};
-      for (final enemy in enemies) {
-        if (!enemy.visible) continue;
-        final current = columnLowest[enemy.col];
-        if (current == null || enemy.row > current.row) {
-          columnLowest[enemy.col] = enemy;
-        }
+  /// Fire a bullet from the lowest visible enemy in a random column.
+  void _fireFromLowestRow() {
+    final columnLowest = <int, Enemy>{};
+    for (final enemy in enemies) {
+      if (!enemy.visible) continue;
+      final current = columnLowest[enemy.col];
+      if (current == null || enemy.row > current.row) {
+        columnLowest[enemy.col] = enemy;
       }
+    }
 
-      if (columnLowest.isNotEmpty) {
-        final randomCol = columnLowest.keys.elementAt(
-          Random().nextInt(columnLowest.length),
-        );
-        final shooter = columnLowest[randomCol]!;
-        final globalPos = shooter.position + position;
-        gameRef.spawnEnemyBullet(globalPos);
-      }
+    if (columnLowest.isNotEmpty) {
+      final randomCol = columnLowest.keys.elementAt(
+        Random().nextInt(columnLowest.length),
+      );
+      final shooter = columnLowest[randomCol]!;
+      final globalPos = shooter.position + position;
+      gameRef.spawnEnemyBullet(globalPos);
     }
   }
 
