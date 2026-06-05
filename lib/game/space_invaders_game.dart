@@ -289,19 +289,22 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void _nextLevel() {
-    final nextIndex = currentLevel + 1;
-    if (nextIndex >= LevelConfig.levels.length) {
-      _triggerVictory();
-      return;
-    }
-    // Reset power-up timers on level transition for fairness
-    freezeTimer = 0.0;
-    shieldTimer = 0.0;
-    tripleShotTimer = 0.0;
-    spreadShotTimer = 0.0;
-    player.shieldActive = false;
-    _playSound('level_up.wav');
-    _startLevel(nextIndex);
+    _screenTransition.start(() {
+      _clearBullets();
+      final nextIndex = currentLevel + 1;
+      if (nextIndex >= LevelConfig.levels.length) {
+        _triggerVictory();
+        return;
+      }
+      // Reset power-up timers on level transition for fairness
+      freezeTimer = 0.0;
+      shieldTimer = 0.0;
+      tripleShotTimer = 0.0;
+      spreadShotTimer = 0.0;
+      player.shieldActive = false;
+      _playSound('level_up.wav');
+      _startLevel(nextIndex);
+    });
   }
 
   void _triggerVictory() {
@@ -756,7 +759,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     if (complete) {
       isTransitioning = true;
       Future.delayed(const Duration(milliseconds: 1500), () {
-        _clearBullets();
         _nextLevel();
       });
     }
@@ -816,27 +818,30 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void _resetGame() {
-    _clearBullets();
-    player.position = Vector2(size.x / 2, size.y - 80);
-    player.visible = true;
-    invulnerabilityTimer = 0.0;
-    score = 0;
-    lives = 3;
-    isGameOver = false;
-    gameOverText?.text = '';
-    isGameStarted = true;
-    isTransitioning = false;
-    _gameJustStarted = true;
-    // Reset power-up state
-    shieldTimer = 0.0;
-    tripleShotTimer = 0.0;
-    freezeTimer = 0.0;
-    spreadShotTimer = 0.0;
-    player.shieldActive = false;
-    if (invaderGrid != null) invaderGrid!.frozen = false;
-    if (boss != null) boss!.frozen = false;
-    _powerUps.clear();
-    _resetLevel(0);
+    if (_screenTransition.isActive) return;
+    _screenTransition.start(() {
+      _clearBullets();
+      player.position = Vector2(size.x / 2, size.y - 80);
+      player.visible = true;
+      invulnerabilityTimer = 0.0;
+      score = 0;
+      lives = 3;
+      isGameOver = false;
+      gameOverText?.text = '';
+      isGameStarted = true;
+      isTransitioning = false;
+      _gameJustStarted = true;
+      // Reset power-up state
+      shieldTimer = 0.0;
+      tripleShotTimer = 0.0;
+      freezeTimer = 0.0;
+      spreadShotTimer = 0.0;
+      player.shieldActive = false;
+      if (invaderGrid != null) invaderGrid!.frozen = false;
+      if (boss != null) boss!.frozen = false;
+      _powerUps.clear();
+      _resetLevel(0);
+    });
   }
 
   void onExternalPanUpdate(double dx) {
