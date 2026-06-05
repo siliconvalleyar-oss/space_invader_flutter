@@ -16,6 +16,7 @@ import '../components/collision_utils.dart';
 import '../components/power_up.dart';
 import '../components/main_menu.dart';
 import '../components/level_select.dart';
+import '../components/screen_transition.dart';
 import '../utils/high_score_manager.dart';
 
 /// Level configuration for progressive difficulty.
@@ -103,6 +104,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   int unlockedLevel = 0;
   late MainMenu mainMenu;
   late LevelSelect levelSelect;
+  late ScreenTransition _screenTransition;
   int get highScore => HighScoreManager.highScore;
 
   @override
@@ -205,6 +207,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     levelSelect = LevelSelect()
       ..size = size
       ..priority = 500;
+
+    // Screen transition overlay (idle until used)
+    _screenTransition = ScreenTransition()
+      ..size = size
+      ..priority = 600;
+    add(_screenTransition);
 
     // Hide player until game starts
     player.visible = false;
@@ -582,37 +590,45 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
   /// Start a new game from the main menu (level 0).
   void startGameFromMenu() {
-    _playSound('shoot.wav');
-    _gameState = GameState.playing;
-    remove(mainMenu);
-    _doStartGame();
+    _screenTransition.start(() {
+      _playSound('shoot.wav');
+      _gameState = GameState.playing;
+      remove(mainMenu);
+      _doStartGame();
+    });
   }
 
   /// Show the level select screen.
   void showLevelSelect() {
-    _playSound('level_up.wav');
-    _gameState = GameState.levelSelect;
-    remove(mainMenu);
-    add(levelSelect);
+    _screenTransition.start(() {
+      _playSound('level_up.wav');
+      _gameState = GameState.levelSelect;
+      remove(mainMenu);
+      add(levelSelect);
+    });
   }
 
   /// Return to the main menu.
   void showMainMenu() {
-    _playSound('shoot.wav');
-    _gameState = GameState.menu;
-    remove(levelSelect);
-    add(mainMenu);
+    _screenTransition.start(() {
+      _playSound('shoot.wav');
+      _gameState = GameState.menu;
+      remove(levelSelect);
+      add(mainMenu);
+    });
   }
 
   /// Start a game from the level select at a specific level.
   void startLevelFromSelect(int levelIndex) {
-    _playSound('shoot.wav');
-    _gameState = GameState.playing;
-    remove(levelSelect);
-    _doStartGame();
-    // Override to start at selected level
-    currentLevel = levelIndex;
-    _startLevel(levelIndex);
+    _screenTransition.start(() {
+      _playSound('shoot.wav');
+      _gameState = GameState.playing;
+      remove(levelSelect);
+      _doStartGame();
+      // Override to start at selected level
+      currentLevel = levelIndex;
+      _startLevel(levelIndex);
+    });
   }
 
   /// Internal: set up the game for playing.
@@ -830,6 +846,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void onExternalTapAt(Vector2 position) {
+    if (_screenTransition.isActive) return;
     switch (_gameState) {
       case GameState.menu:
         mainMenu.handleTap(position);
@@ -852,6 +869,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
   @override
   KeyEventResult onKeyEvent(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
+    if (_screenTransition.isActive) return KeyEventResult.handled;
     if (_gameState == GameState.menu) {
       if (keysPressed.contains(LogicalKeyboardKey.space) || keysPressed.contains(LogicalKeyboardKey.enter)) {
         startGameFromMenu();
@@ -886,10 +904,5 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     livesText?.position = Vector2(size.x - 120, 10);
     levelText?.position = Vector2(size.x / 2, 10);
     gameOverText?.position = Vector2(size.x / 2, size.y / 2 - 20);
-    // Update menu and level select sizes
-    if (_gameState == GameState.menu || _gameState == GameState.levelSelect) {
-      mainMenu.size = size;
-      levelSelect.size = size;
-    }
   }
 }
