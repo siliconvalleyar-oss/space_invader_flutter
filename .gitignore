@@ -1,0 +1,37 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+*.iml
+*.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Android
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+key.properties
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Generated
+*.generated.dart
+
+# Caches
+.coverage/
+pubspec.lock
