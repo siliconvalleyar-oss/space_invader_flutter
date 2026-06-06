@@ -321,14 +321,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     super.update(dt);
     if (_gameState != GameState.playing || isGameOver || isTransitioning) return;
 
-    // Auto-fire
-    fireTimer += dt;
-    if (fireTimer >= fireCooldown && player.visible) {
-      fireTimer = 0.0;
-      _spawnPlayerBullet(playSound: _gameJustStarted);
-      _gameJustStarted = false;
-    }
-
     // Invulnerability timer
     if (invulnerabilityTimer > 0) {
       invulnerabilityTimer -= dt;
@@ -377,13 +369,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         for (final enemy in invaderGrid!.enemies.toList()) {
           if (!enemy.visible) continue;
 
-          // Check alpha collision if alpha map exists, otherwise bounding box
           bool collision = false;
           final enemyAlpha = _enemyAlphas[enemy];
           if (enemyAlpha != null && _playerAlpha != null) {
-            collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, enemy, enemyAlpha, step: 1);
+            collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, enemy, enemyAlpha, step: 2);
           } else {
-            collision = bullet.toRect().overlaps(enemy.toRect());
+            collision = bullet.toAbsoluteRect().overlaps(enemy.toAbsoluteRect());
           }
 
           if (collision) {
@@ -392,10 +383,10 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
             enemy.takeDamage();
             if (!enemy.visible) {
               score += 10;
-              _spawnExplosion(enemy.position + (invaderGrid?.position ?? Vector2.zero()), const Color(0xFFFF6644));
+              _spawnExplosion(enemy.absolutePosition, const Color(0xFFFF6644));
               _playSound('explosion.wav');
               HapticFeedback.lightImpact();
-              _maybeSpawnPowerUp(enemy.position + (invaderGrid?.position ?? Vector2.zero()));
+              _maybeSpawnPowerUp(enemy.absolutePosition);
             }
             hit = true;
             break;
@@ -406,9 +397,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       if (!hit && boss != null && boss!.visible && bullet.visible) {
         bool collision = false;
         if (_bossAlpha != null && _playerAlpha != null) {
-          collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, boss!, _bossAlpha!, step: 1);
+          collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, boss!, _bossAlpha!, step: 2);
         } else {
-          collision = bullet.toRect().overlaps(boss!.toRect());
+          collision = bullet.toAbsoluteRect().overlaps(boss!.toAbsoluteRect());
         }
 
         if (collision) {
@@ -417,9 +408,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
           boss!.takeDamage();
           if (!boss!.visible) {
             score += 50;
-            _spawnExplosion(boss!.position, const Color(0xFFFFAA00));
-            _spawnExplosion(boss!.position + Vector2(-15, -10), const Color(0xFFFF6644));
-            _spawnExplosion(boss!.position + Vector2(15, 10), const Color(0xFFFFAA00));
+            _spawnExplosion(boss!.absolutePosition, const Color(0xFFFFAA00));
+            _spawnExplosion(boss!.absolutePosition + Vector2(-15, -10), const Color(0xFFFF6644));
+            _spawnExplosion(boss!.absolutePosition + Vector2(15, 10), const Color(0xFFFFAA00));
             _playSound('explosion.wav');
             HapticFeedback.heavyImpact();
           }
@@ -436,7 +427,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       if (collision) {
         bullet.removeFromParent();
         enemyBullets.remove(bullet);
-        // Shield absorbs damage
         if (shieldTimer > 0) {
           _spawnExplosion(player.position, const Color(0xFF44AAFF));
           _playSound('player_hit.wav');
@@ -450,6 +440,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
           _spawnExplosion(player.position, const Color(0xFFFF2200));
           for (final eb in enemyBullets.toList()) { eb.removeFromParent(); enemyBullets.remove(eb); }
           if (lives <= 0) _triggerGameOver();
+          break;
         }
       }
     }
@@ -457,7 +448,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     // Power-ups vs player collection
     for (final pu in _powerUps.toList()) {
       if (!pu.visible || !player.visible) continue;
-      if (pu.toRect().overlaps(player.toRect())) {
+      if (pu.toAbsoluteRect().overlaps(player.toAbsoluteRect())) {
         _collectPowerUp(pu);
         pu.removeFromParent();
         _powerUps.remove(pu);
@@ -475,7 +466,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     }
 
     if (spreadShotTimer > 0) {
-      // Spread shot: 5 bullets in wide fan
       final offsets = [-24.0, -12.0, 0.0, 12.0, 24.0];
       for (final offset in offsets) {
         final bullet = Bullet(
@@ -487,7 +477,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         add(bullet);
       }
     } else if (tripleShotTimer > 0) {
-      // Triple shot: 3 bullets in spread pattern
       final offsets = [-12.0, 0.0, 12.0];
       for (final offset in offsets) {
         final bullet = Bullet(
@@ -765,8 +754,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void _clearBullets() {
-    for (final b in playerBullets.toList()) b.removeFromParent();
-    for (final b in enemyBullets.toList()) b.removeFromParent();
+    for (final b in playerBullets) b.removeFromParent();
+    for (final b in enemyBullets) b.removeFromParent();
     playerBullets.clear();
     enemyBullets.clear();
   }
@@ -860,7 +849,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         levelSelect.handleTap(position);
         break;
       case GameState.playing:
-        if (isGameOver) _resetGame();
+        if (isGameOver) {
+          _resetGame();
+        } else {
+          _spawnPlayerBullet();
+          _gameJustStarted = false;
+        }
         break;
     }
   }

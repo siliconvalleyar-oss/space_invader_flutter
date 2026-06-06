@@ -50,8 +50,8 @@ class CollisionUtils {
     PositionComponent b, AlphaMap alphaB, {
     int step = 2,
   }) {
-    final rectA = a.toRect();
-    final rectB = b.toRect();
+    final rectA = a.toAbsoluteRect();
+    final rectB = b.toAbsoluteRect();
 
     // Fast bounding box check
     final overlap = rectA.intersect(rectB);
@@ -93,8 +93,8 @@ class CollisionUtils {
     PositionComponent target, {
     double shrink = 0.3,
   }) {
-    final bulletRect = bullet.toRect();
-    final targetRect = target.toRect();
+    final bulletRect = bullet.toAbsoluteRect();
+    final targetRect = target.toAbsoluteRect();
 
     final shrunkTarget = targetRect.deflate(
       targetRect.shortestSide * shrink,

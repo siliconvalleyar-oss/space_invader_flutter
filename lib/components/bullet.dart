@@ -7,10 +7,11 @@ import '../game/space_invaders_game.dart';
 /// Bullet component rendered with sprite from assets.
 /// Player bullets use disparo_de_nave_00.png (visible beam), 
 /// enemy bullets use bullet.png with red tint.
-class Bullet extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
+class Bullet extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   final bool isPlayerBullet;
   final double speed;
   bool visible = true;
+  Sprite? _sprite;
 
   Bullet({
     required Vector2 position,
@@ -24,19 +25,16 @@ class Bullet extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
   FutureOr<void> onLoad() async {
     await super.onLoad();
     if (isPlayerBullet) {
-      // Use ship shot sprite for player bullets
       try {
-        sprite = await Sprite.load('disparo_de_nave_00.png');
-        // Scale sprite to component size
+        _sprite = await Sprite.load('disparo_de_nave_00.png');
       } catch (_) {
         try {
-          sprite = await Sprite.load('bullet.png');
+          _sprite = await Sprite.load('bullet.png');
         } catch (_) {}
       }
     } else {
-      // Use generic bullet for enemy
       try {
-        sprite = await Sprite.load('bullet.png');
+        _sprite = await Sprite.load('bullet.png');
       } catch (_) {}
     }
     anchor = Anchor.center;
@@ -47,14 +45,10 @@ class Bullet extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
     if (!visible) return;
 
     if (isPlayerBullet) {
-      // Green glow for player bullet
-      _drawGlow(canvas, const Color(0xFF00FF88));      
-      // Draw sprite without tint
-      if (sprite != null) {
-        paint.colorFilter = null;
-        sprite!.render(canvas, size: size);
+      _drawGlow(canvas, const Color(0xFF00FF88));
+      if (_sprite != null) {
+        _sprite!.render(canvas, size: size, position: Vector2.zero());
       }
-      // Bright core line
       final corePaint = Paint()
         ..color = const Color(0xCCFFFFFF)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
@@ -63,12 +57,11 @@ class Bullet extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
         corePaint,
       );
     } else {
-      // Red glow for enemy bullet
       _drawGlow(canvas, const Color(0xFFFF4444));
-      // Draw with red tint
-      if (sprite != null) {
-        paint.colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop);
-        super.render(canvas);
+      if (_sprite != null) {
+        canvas.saveLayer(null, Paint()..colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop));
+        _sprite!.render(canvas, size: size, position: Vector2.zero());
+        canvas.restore();
       }
     }
   }
@@ -98,7 +91,8 @@ class Bullet extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
     } else {
       position.y += speed * dt;
     }
-    if (position.y < -40 || position.y > (gameRef?.size.y ?? 800) + 40) {
+    if (position.y < -40 || position.y > (gameRef.size.y) + 40) {
+      visible = false;
       removeFromParent();
     }
   }

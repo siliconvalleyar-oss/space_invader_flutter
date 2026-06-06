@@ -7,7 +7,7 @@ import '../game/space_invaders_game.dart';
 import 'bullet.dart';
 
 /// Individual enemy invader rendered with sprite from assets.
-class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
+class Enemy extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   int hitPoints = 2;
   final int row;
   final int col;
@@ -15,6 +15,7 @@ class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
   bool visible = true;
   bool frozen = false;
   double _animT = 0;
+  Sprite? sprite;
 
   Enemy({required this.row, required this.col, this.type = 0})
       : super(size: Vector2(30, 24));
@@ -22,7 +23,6 @@ class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
   @override
   FutureOr<void> onLoad() async {
     await super.onLoad();
-    // Select sprite based on enemy type
     final spriteFiles = ['enemy_00.png', 'enemy_01.png', 'enemy_02.png'];
     final file = spriteFiles[type % spriteFiles.length];
     try {
@@ -47,7 +47,6 @@ class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
 
     final pulse = sin(_animT * 3) * 0.1 + 0.9;
 
-    // Glow color changes based on hitpoints and freeze state
     final glowColor = frozen
         ? const Color(0xFF44CCFF)
         : (hitPoints == 2
@@ -58,15 +57,19 @@ class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
     canvas.drawCircle(Offset(size.x / 2, size.y / 2), size.x / 2 * pulse, glowPaint);
 
-    // Draw the sprite
-    super.render(canvas);
+    if (sprite != null) {
+      sprite!.render(canvas, size: size, position: Vector2.zero());
+    } else {
+      canvas.drawRect(
+        Rect.fromLTWH(1, 1, size.x - 2, size.y - 2),
+        Paint()..color = glowColor.withValues(alpha: 0.5 * pulse),
+      );
+    }
 
-    // Frozen visual effect
     if (frozen) {
       _drawFrozenEffect(canvas);
     }
 
-    // Damage overlay
     if (hitPoints == 1) {
       final crackPaint = Paint()
         ..color = const Color(0x44FFFFFF)
@@ -136,7 +139,7 @@ class Enemy extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
 }
 
 /// Boss enemy - large invader with sprite rendering.
-class Boss extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
+class Boss extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   int hitPoints = 10;
   final int maxHp;
   bool visible = true;
@@ -144,6 +147,7 @@ class Boss extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
   double _animT = 0;
   double _beamTimer = 0;
   double _beamInterval = 2.5;
+  Sprite? sprite;
 
   Boss({this.maxHp = 10}) : super(size: Vector2(64, 48)) {
     hitPoints = maxHp;
@@ -201,15 +205,20 @@ class Boss extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
       canvas.drawCircle(Offset(cx, cy), cx * 1.1, glowPaint);
     }
 
-    // Draw sprite
-    super.render(canvas);
+    if (sprite != null) {
+      sprite!.render(canvas, size: size, position: Vector2.zero());
+    } else {
+      canvas.drawRect(
+        Rect.fromLTWH(2, 2, size.x - 4, size.y - 4),
+        Paint()..color = Color.fromARGB(180, 50, (50 + (1 - hp) * 150).toInt(), (50 + hp * 200).toInt()),
+      );
+    }
 
-    // Frozen visual effect
     if (frozen) {
       _drawBossFrozenEffect(canvas);
     }
 
-    // Health bar
+    _drawHealthBar(canvas);
     _drawHealthBar(canvas);
   }
 

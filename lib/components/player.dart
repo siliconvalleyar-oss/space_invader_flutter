@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui' show Canvas, Paint, Color, Offset, MaskFilter, BlurStyle, PaintingStyle;
+import 'dart:ui' show Canvas, Paint, Color, Offset, Rect, RRect, Radius, MaskFilter, BlurStyle, PaintingStyle;
 import 'package:flame/components.dart';
 import 'package:flame/sprite.dart';
 import '../game/space_invaders_game.dart';
 
 /// Player spaceship component rendered with sprite from assets.
 /// Uses nave_00.png (88x118) scaled to fit gameplay.
-class Player extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
+class Player extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   bool visible = true;
   bool shieldActive = false;
   double _engineAnimT = 0;
+  Sprite? sprite;
 
   Player() : super(size: Vector2(40, 54));
 
@@ -37,6 +38,17 @@ class Player extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
   void render(Canvas canvas) {
     if (!visible) return;
 
+    if (sprite != null) {
+      sprite!.render(canvas, size: size, position: Vector2.zero());
+    } else {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(size.toRect(), const Radius.circular(6)),
+        Paint()
+          ..color = const Color(0xFF44AA88).withValues(alpha: 0.4)
+          ..style = PaintingStyle.fill,
+      );
+    }
+
     // Engine glow animation
     final engineAlpha = (0.3 + 0.2 * sin(_engineAnimT * 6)).clamp(0.0, 1.0);
     final engineGlow = Paint()
@@ -58,9 +70,6 @@ class Player extends SpriteComponent with HasGameRef<SpaceInvadersGame> {
         ..strokeWidth = 2;
       canvas.drawCircle(Offset(size.x / 2, size.y / 2), size.x * 0.7, shieldRing);
     }
-
-    // Draw the sprite
-    super.render(canvas);
 
     // Cockpit glow
     final cockpitPaint = Paint()
