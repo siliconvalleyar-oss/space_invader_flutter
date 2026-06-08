@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui show Canvas;
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
@@ -17,6 +18,8 @@ import '../components/power_up.dart';
 import '../components/main_menu.dart';
 import '../components/level_select.dart';
 import '../components/screen_transition.dart';
+import '../components/score_popup.dart';
+import '../components/pause_menu.dart';
 import '../utils/high_score_manager.dart';
 
 /// Level configuration for progressive difficulty.
@@ -76,12 +79,14 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   double fireCooldown = 0.2;
   bool _gameJustStarted = true;
 
-  // Experience system
+  // Experience system (15 levels)
   int xp = 0;
   int playerLevel = 1;
   static const int xpPerKill = 10;
   static const int xpPerBossKill = 50;
-  static const List<int> xpThresholds = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500];
+  static const List<int> xpThresholds = [0, 60, 150, 270, 420, 600, 810, 1050, 1320, 1620, 1950, 2310, 2700, 3120, 3570];
+
+  double get powerUpDuration => basePowerUpDuration;
 
   // Raw pointer tracking (instant, no gesture arena slop)
   double? _pointerStartFingerX;
@@ -93,8 +98,27 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   double tripleShotTimer = 0.0;
   double freezeTimer = 0.0;
   double spreadShotTimer = 0.0;
-  static const double powerUpDuration = 6.0;
+  double basePowerUpDuration = 6.0;
+  double shieldDurationBonus = 0.0;
+  double tripleDurationBonus = 0.0;
+  double spreadDurationBonus = 0.0;
+  double freezeDurationBonus = 0.0;
   final List<PowerUp> _powerUps = [];
+
+  // Screen shake
+  double _shakeTimer = 0.0;
+  Vector2 _shakeOffset = Vector2.zero();
+  static const double _shakeDecay = 4.0;
+
+  // Floating score popups
+  final List<ScorePopup> _scorePopups = [];
+
+  // Background music
+  bool _bgmPlaying = false;
+
+  // Pause
+  bool _isPaused = false;
+  late PauseMenu _pauseMenu;
 
   final List<Bullet> playerBullets = [];
   final List<Bullet> enemyBullets = [];
@@ -241,6 +265,11 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       ..priority = 600;
     add(_screenTransition);
 
+    // Pause menu overlay (hidden)
+    _pauseMenu = PauseMenu()
+      ..priority = 700;
+    add(_pauseMenu);
+
     // Hide player until game starts
     player.visible = false;
   }
@@ -321,6 +350,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
   void _triggerVictory() {
     isGameOver = true;
+    _bgmPlaying = false;
+    _triggerShake(0.8);
     final oldHS = HighScoreManager.highScore;
     HighScoreManager.tryUpdate(score);
     final isNew = score > oldHS;
@@ -331,6 +362,21 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   @override
   void update(double dt) {
     super.update(dt);
+
+    // Screen shake decay
+    if (_shakeTimer > 0) {
+      _shakeTimer -= dt;
+      _shakeOffset = Vector2(
+        (Random().nextDouble() - 0.5) * _shakeTimer * 6,
+        (Random().nextDouble() - 0.5) * _shakeTimer * 6,
+      );
+      if (_shakeTimer <= 0) _shakeOffset = Vector2.zero();
+    }
+
+    // Score popup cleanup
+    _scorePopups.removeWhere((p) => !p.visible);
+
+    if (_isPaused) return;
     if (_gameState != GameState.playing || isGameOver || isTransitioning) return;
 
     // Invulnerability timer
@@ -374,6 +420,34 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     _updatePowerUpHud();
   }
 
+  @override
+  void render(ui.Canvas canvas) {
+    canvas.save();
+    if (_shakeTimer > 0) {
+      canvas.translate(_shakeOffset.x, _shakeOffset.y);
+    }
+    super.render(canvas);
+    canvas.restore();
+  }
+
+  void _triggerShake(double intensity) {
+    _shakeTimer = intensity;
+    _shakeOffset = Vector2(
+      (Random().nextDouble() - 0.5) * intensity * 6,
+      (Random().nextDouble() - 0.5) * intensity * 6,
+    );
+  }
+
+  void _spawnScorePopup(Vector2 position, String text, Color color) {
+    final popup = ScorePopup(
+      position: Vector2(position.x, position.y - 10),
+      text: text,
+      color: color,
+    );
+    _scorePopups.add(popup);
+    add(popup);
+  }
+
   void _checkCollisions() {
     // Player bullets vs enemies (expanded bounding box for reliability)
     for (final bullet in playerBullets.toList()) {
@@ -390,11 +464,14 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
             bullet.visible = false;
             bullet.removeFromParent();
             playerBullets.remove(bullet);
+            enemy.hitFlash();
             enemy.takeDamage();
             if (!enemy.visible) {
               score += 10;
               _addXp(xpPerKill);
               _spawnExplosion(enemy.absolutePosition, const Color(0xFFFF6644));
+              _spawnScorePopup(enemy.absolutePosition, '+10', Colors.yellowAccent);
+              _triggerShake(0.15);
               _playSound('explosion.wav');
               HapticFeedback.lightImpact();
               _maybeSpawnPowerUp(enemy.absolutePosition);
@@ -417,6 +494,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
             _spawnExplosion(boss!.absolutePosition, const Color(0xFFFFAA00));
             _spawnExplosion(boss!.absolutePosition + Vector2(-15, -10), const Color(0xFFFF6644));
             _spawnExplosion(boss!.absolutePosition + Vector2(15, 10), const Color(0xFFFFAA00));
+            _spawnScorePopup(boss!.absolutePosition, '+50', Colors.orangeAccent);
+            _triggerShake(0.4);
             _playSound('explosion.wav');
             HapticFeedback.heavyImpact();
           }
@@ -441,6 +520,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         if (invulnerabilityTimer <= 0) {
           lives--;
           invulnerabilityTimer = invulnerabilityDuration;
+          _triggerShake(0.3);
           _playSound('player_hit.wav');
           HapticFeedback.mediumImpact();
           _spawnExplosion(player.position, const Color(0xFFFF2200));
@@ -559,12 +639,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
     switch (pu.type) {
       case PowerUpType.shield:
-        shieldTimer = powerUpDuration;
+        shieldTimer = basePowerUpDuration + shieldDurationBonus;
         player.shieldActive = true;
         _showPowerUpLabel('SHIELD', const Color(0xFF44AAFF));
         break;
       case PowerUpType.triple:
-        tripleShotTimer = powerUpDuration;
+        tripleShotTimer = basePowerUpDuration + tripleDurationBonus;
         _showPowerUpLabel('TRIPLE', const Color(0xFFFFAA00));
         break;
       case PowerUpType.extraLife:
@@ -573,13 +653,13 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         livesText?.text = 'LIVES: $lives';
         break;
       case PowerUpType.freeze:
-        freezeTimer = powerUpDuration;
+        freezeTimer = basePowerUpDuration + freezeDurationBonus;
         if (invaderGrid != null) invaderGrid!.frozen = true;
         if (boss != null) boss!.frozen = true;
         _showPowerUpLabel('❄️ FREEZE', const Color(0xFF88CCFF));
         break;
       case PowerUpType.spread:
-        spreadShotTimer = powerUpDuration;
+        spreadShotTimer = basePowerUpDuration + spreadDurationBonus;
         _showPowerUpLabel('🔥 SPREAD', const Color(0xFFFF8800));
         break;
       case PowerUpType.bomb:
@@ -636,12 +716,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   void _doStartGame() {
     isGameStarted = true;
     player.visible = true;
-    // Level already pre-created in onLoad(), no need to recreate
-    // Just reset power-up state and game vars
     score = 0;
     xp = 0;
     playerLevel = 1;
     fireCooldown = 0.2;
+    basePowerUpDuration = 6.0;
+    shieldDurationBonus = 0.0;
+    tripleDurationBonus = 0.0;
+    spreadDurationBonus = 0.0;
+    freezeDurationBonus = 0.0;
     lives = 3;
     invulnerabilityTimer = 0.0;
     fireTimer = 0.0;
@@ -650,8 +733,19 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     livesText?.text = 'LIVES: 3';
     levelText?.text = 'LEVEL 1';
     _updateXpDisplay();
-    // Ensure the grid is reset to level 0
     _resetLevel(0);
+    _startBgm();
+  }
+
+  void _startBgm() {
+    if (_bgmPlaying) return;
+    _bgmPlaying = true;
+    try {
+      FlameAudio.play('sounds/level_up.wav').then((player) {
+        player?.setPlaybackRate(0.8);
+        player?.setVolume(0.15);
+      });
+    } catch (_) {}
   }
 
   /// Show a brief floating text label for power-up collection.
@@ -700,17 +794,61 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     _updateXpDisplay();
   }
 
+  /// Per-level bonus descriptions.
+  static const List<String> levelBonuses = [
+    '', // L1
+    'FIRE RATE +', // L2
+    'SHIELD +1s',  // L3
+    '+1 LIVE',     // L4
+    'TRIPLE +1s',  // L5
+    'FIRE RATE ++', // L6
+    '+1 LIVE',     // L7
+    'SPREAD +1s',  // L8
+    'FREEZE +1s',  // L9
+    '+1 LIVE',     // L10
+    'FIRE RATE +++', // L11
+    'SHIELD +2s',  // L12
+    '+1 LIVE',     // L13
+    'TRIPLE +2s',  // L14
+    'MASTER',      // L15
+  ];
+
   /// Handle player level up with bonuses.
   void _levelUp() {
     playerLevel++;
-    fireCooldown = (0.2 - (playerLevel - 1) * 0.012).clamp(0.1, 0.2);
-    _playSound('level_up.wav');
-    _showPowerUpLabel('LEVEL $playerLevel', const Color(0xFFFFCC00));
-    if (playerLevel % 3 == 0) {
+    final level = playerLevel;
+    fireCooldown = (0.2 - (level - 1) * 0.009).clamp(0.08, 0.2);
+
+    String bonus = '';
+
+    if (level == 3 || level == 5 || level == 7) {
+      basePowerUpDuration += 1.0;
+      bonus = level == 3 ? 'SHIELD +1s' : (level == 5 ? 'TRIPLE +1s' : '+1 LIFE');
+    }
+    if (level == 8) { spreadDurationBonus += 1.0; bonus = 'SPREAD +1s'; }
+    if (level == 9) { freezeDurationBonus += 1.0; bonus = 'FREEZE +1s'; }
+    if (level == 11) { shieldDurationBonus += 2.0; bonus = 'SHIELD +2s'; }
+    if (level == 13) { tripleDurationBonus += 2.0; bonus = 'TRIPLE +2s'; }
+
+    if (level == 4 || level == 7 || level == 10 || level == 13) {
       lives++;
       livesText?.text = 'LIVES: $lives';
-      _showPowerUpLabel('+1 UP', const Color(0xFF44FF44));
+      bonus = '+1 UP';
     }
+
+    if (level == 15) {
+      lives += 2;
+      shieldDurationBonus += 3.0;
+      tripleDurationBonus += 3.0;
+      spreadDurationBonus += 3.0;
+      freezeDurationBonus += 3.0;
+      livesText?.text = 'LIVES: $lives';
+      bonus = '🏆 MASTER';
+    }
+
+    _playSound('level_up.wav');
+    final label = bonus.isNotEmpty ? 'LEVEL $level - $bonus' : 'LEVEL $level';
+    _showPowerUpLabel(label, const Color(0xFFFFCC00));
   }
 
   /// Update XP bar and player level text.
@@ -740,6 +878,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       _spawnExplosion(boss!.position + Vector2(-15, -10), const Color(0xFFFF6644));
       _spawnExplosion(boss!.position + Vector2(15, 10), const Color(0xFFFFAA00));
     }
+    _triggerShake(0.5);
     _playSound('explosion.wav');
     HapticFeedback.heavyImpact();
   }
@@ -817,7 +956,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
   void _triggerGameOver() {
     isGameOver = true;
+    _bgmPlaying = false;
     _playSound('game_over.wav');
+    _triggerShake(0.6);
     _spawnExplosion(player.position, const Color(0xFFFF0000));
     player.visible = false;
     final oldHS = HighScoreManager.highScore;
@@ -891,15 +1032,36 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     player.position.x = (_pointerStartPlayerX! + offset).clamp(30.0, size.x - 30.0);
   }
 
+  void togglePause() {
+    if (_isPaused) {
+      _isPaused = false;
+      _pauseMenu.hide();
+    } else {
+      _isPaused = true;
+      _pauseMenu.show();
+    }
+  }
+
   void onExternalPointerUp(double localDx, double localDy) {
     if (_screenTransition.isActive) {
       _resetPointer();
       return;
     }
 
+    final tapPos = Vector2(localDx, localDy);
+
+    // Check pause menu first
+    if (_pauseMenu.isActive) {
+      final action = _pauseMenu.handleTap(tapPos);
+      if (action == 'resume') togglePause();
+      else if (action == 'restart') { _isPaused = false; _pauseMenu.hide(); _resetGame(); }
+      else if (action == 'quit') { _isPaused = false; _pauseMenu.hide(); showMainMenu(); }
+      _resetPointer();
+      return;
+    }
+
     if (!_pointerMoved) {
       // It was a tap, not a drag
-      final tapPos = Vector2(localDx, localDy);
       switch (_gameState) {
         case GameState.menu:
           mainMenu.handleTap(tapPos);
@@ -1020,8 +1182,14 @@ class XpBar extends PositionComponent {
     final rect = Rect.fromLTWH(0, 0, size.x, size.y);
     if (isBackground) {
       final bgPaint = Paint()
-        ..color = const Color(0xFF1A1A2E);
+        ..color = const Color(0xFF0A0A1A);
       canvas.drawRect(rect, bgPaint);
+      // Top highlight line
+      final hlPaint = Paint()
+        ..color = const Color(0x22FFFFFF)
+        ..strokeWidth = 1;
+      canvas.drawLine(Offset(0, 0), Offset(size.x, 0), hlPaint);
+      // Border
       final borderPaint = Paint()
         ..color = const Color(0xFF334466)
         ..style = PaintingStyle.stroke
@@ -1030,9 +1198,26 @@ class XpBar extends PositionComponent {
     } else {
       if (fillPercent <= 0) return;
       final barRect = Rect.fromLTWH(0, 0, size.x * fillPercent.clamp(0.0, 1.0), size.y);
+      // Glow
+      final glowPaint = Paint()
+        ..color = const Color(0x33AA88FF)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      canvas.drawRect(barRect, glowPaint);
+      // Fill
       final fillPaint = Paint()
-        ..color = const Color(0xFF6644CC);
+        ..color = const Color(0xFF7744DD);
       canvas.drawRect(barRect, fillPaint);
+      // Bright top line
+      if (fillPercent > 0.02) {
+        final brightPaint = Paint()
+          ..color = const Color(0x66BB99FF)
+          ..strokeWidth = 1;
+        canvas.drawLine(
+          Offset(0, 0),
+          Offset(size.x * fillPercent.clamp(0.0, 1.0), 0),
+          brightPaint,
+        );
+      }
     }
   }
 }

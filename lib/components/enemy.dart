@@ -15,6 +15,7 @@ class Enemy extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   bool visible = true;
   bool frozen = false;
   double _animT = 0;
+  double _hitFlashTimer = 0;
   Sprite? sprite;
 
   Enemy({required this.row, required this.col, this.type = 0})
@@ -35,10 +36,15 @@ class Enemy extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     anchor = Anchor.center;
   }
 
+  void hitFlash() {
+    _hitFlashTimer = 0.12;
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
     _animT += dt;
+    if (_hitFlashTimer > 0) _hitFlashTimer -= dt;
   }
 
   @override
@@ -63,6 +69,17 @@ class Enemy extends PositionComponent with HasGameRef<SpaceInvadersGame> {
       canvas.drawRect(
         Rect.fromLTWH(1, 1, size.x - 2, size.y - 2),
         Paint()..color = glowColor.withValues(alpha: 0.5 * pulse),
+      );
+    }
+
+    // Hit flash overlay
+    if (_hitFlashTimer > 0) {
+      final flashPaint = Paint()
+        ..color = const Color(0xCCFFFFFF).withValues(alpha: (_hitFlashTimer / 0.12).clamp(0.0, 1.0))
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        flashPaint,
       );
     }
 

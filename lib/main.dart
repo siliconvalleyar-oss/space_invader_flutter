@@ -62,7 +62,7 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
 
-          // Fire button overlay (bottom-right, uses Listener to avoid pan gesture conflicts)
+          // Fire button overlay (bottom-right)
           Positioned(
             right: 20,
             bottom: 20,
@@ -92,6 +92,34 @@ class _GameScreenState extends State<GameScreen> {
                   Icons.flash_on,
                   color: Color(0xAAFF4444),
                   size: 30,
+                ),
+              ),
+            ),
+          ),
+
+          // Pause button (top-left)
+          Positioned(
+            left: 12,
+            top: 12,
+            child: Listener(
+              onPointerDown: (_) {
+                _game.togglePause();
+              },
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0x33FFFFFF),
+                  border: Border.all(
+                    color: const Color(0x44FFFFFF),
+                    width: 1.5,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.pause,
+                  color: Color(0xAAFFFFFF),
+                  size: 20,
                 ),
               ),
             ),
