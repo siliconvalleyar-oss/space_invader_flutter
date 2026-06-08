@@ -103,8 +103,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   TextComponent? highScoreText;
   TextComponent? powerUpHud;
   TextComponent? gameOverText;
-  late XpBar xpBarBg;
-  late XpBar xpBarFill;
+  final xpBarBg = XpBar(position: Vector2.zero(), size: Vector2.zero(), fillPercent: 0, isBackground: true);
+  final xpBarFill = XpBar(position: Vector2.zero(), size: Vector2.zero(), fillPercent: 0, isBackground: false);
   TextComponent? playerLevelText;
   bool isGameOver = false;
   bool isGameStarted = false;
@@ -197,22 +197,14 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     add(powerUpHud!);
 
     // XP Bar background
-    xpBarBg = XpBar(
-      position: Vector2(0, size.y - 14),
-      size: Vector2(size.x, 14),
-      fillPercent: 0.0,
-      isBackground: true,
-    );
+    xpBarBg.position = Vector2(0, size.y - 14);
+    xpBarBg.size = Vector2(size.x, 14);
     xpBarBg.priority = 100;
     add(xpBarBg);
 
     // XP Bar fill
-    xpBarFill = XpBar(
-      position: Vector2(0, size.y - 14),
-      size: Vector2(size.x, 14),
-      fillPercent: 0.0,
-      isBackground: false,
-    );
+    xpBarFill.position = Vector2(0, size.y - 14);
+    xpBarFill.size = Vector2(size.x, 14);
     xpBarFill.priority = 101;
     add(xpBarFill);
 
