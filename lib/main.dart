@@ -43,19 +43,19 @@ class _GameScreenState extends State<GameScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Game widget with drag movement
-          GestureDetector(
-            onPanUpdate: (details) {
-              _game.onExternalPanUpdate(details.delta.dx);
+          // Game widget with raw pointer movement (instant, no gesture arena delay)
+          Listener(
+            onPointerDown: (details) {
+              _game.onExternalPointerDown(details.localPosition.dx);
             },
-            onTapUp: (details) {
-              final box = context.findRenderObject() as RenderBox?;
-              if (box != null) {
-                final localPos = box.globalToLocal(details.globalPosition);
-                _game.onExternalTapAt(
-                  Vector2(localPos.dx, localPos.dy),
-                );
-              }
+            onPointerMove: (details) {
+              _game.onExternalPointerMove(details.localPosition.dx);
+            },
+            onPointerUp: (details) {
+              _game.onExternalPointerUp(details.localPosition.dx, details.localPosition.dy);
+            },
+            onPointerCancel: (_) {
+              _game.onExternalPointerCancel();
             },
             child: GameWidget(
               game: _game,

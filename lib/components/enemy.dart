@@ -8,7 +8,7 @@ import 'bullet.dart';
 
 /// Individual enemy invader rendered with sprite from assets.
 class Enemy extends PositionComponent with HasGameRef<SpaceInvadersGame> {
-  int hitPoints = 2;
+  int hitPoints = 1;
   final int row;
   final int col;
   final int type;

@@ -328,7 +328,7 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
             col * spacingX - gridWidth / 2,
             row * spacingY - ((rows - 1) * spacingY) / 2,
           );
-          enemies[idx].hitPoints = 2;
+          enemies[idx].hitPoints = 1;
           enemies[idx].visible = true;
         }
       }

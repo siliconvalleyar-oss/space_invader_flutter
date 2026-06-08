@@ -83,6 +83,11 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   static const int xpPerBossKill = 50;
   static const List<int> xpThresholds = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500];
 
+  // Raw pointer tracking (instant, no gesture arena slop)
+  double? _pointerStartFingerX;
+  double? _pointerStartPlayerX;
+  bool _pointerMoved = false;
+
   // Power-up state
   double shieldTimer = 0.0;
   double tripleShotTimer = 0.0;
@@ -382,6 +387,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
           if (!enemy.visible) continue;
 
           if (bulletRect.overlaps(enemy.toAbsoluteRect())) {
+            bullet.visible = false;
             bullet.removeFromParent();
             playerBullets.remove(bullet);
             enemy.takeDamage();
@@ -399,8 +405,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         }
       }
 
-      if (!hit && boss != null && boss!.visible && bullet.visible) {
+      if (!hit && boss != null && boss!.visible) {
         if (bulletRect.overlaps(boss!.toAbsoluteRect())) {
+          bullet.visible = false;
           bullet.removeFromParent();
           playerBullets.remove(bullet);
           boss!.takeDamage();
@@ -870,10 +877,58 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     });
   }
 
-  void onExternalPanUpdate(double dx) {
+  void onExternalPointerDown(double localDx) {
+    _pointerStartFingerX = localDx;
+    _pointerStartPlayerX = (_gameState == GameState.playing && !isGameOver) ? player.position.x : null;
+    _pointerMoved = false;
+  }
+
+  void onExternalPointerMove(double localDx) {
+    _pointerMoved = true;
     if (_gameState != GameState.playing || isGameOver) return;
-    player.position.x += dx;
-    player.position.x = player.position.x.clamp(30.0, size.x - 30.0);
+    if (_pointerStartFingerX == null || _pointerStartPlayerX == null) return;
+    final offset = localDx - _pointerStartFingerX!;
+    player.position.x = (_pointerStartPlayerX! + offset).clamp(30.0, size.x - 30.0);
+  }
+
+  void onExternalPointerUp(double localDx, double localDy) {
+    if (_screenTransition.isActive) {
+      _resetPointer();
+      return;
+    }
+
+    if (!_pointerMoved) {
+      // It was a tap, not a drag
+      final tapPos = Vector2(localDx, localDy);
+      switch (_gameState) {
+        case GameState.menu:
+          mainMenu.handleTap(tapPos);
+          break;
+        case GameState.levelSelect:
+          levelSelect.handleTap(tapPos);
+          break;
+        case GameState.playing:
+          if (isGameOver) {
+            _resetGame();
+          } else {
+            _spawnPlayerBullet();
+            _gameJustStarted = false;
+          }
+          break;
+      }
+    }
+
+    _resetPointer();
+  }
+
+  void onExternalPointerCancel() {
+    _resetPointer();
+  }
+
+  void _resetPointer() {
+    _pointerStartFingerX = null;
+    _pointerStartPlayerX = null;
+    _pointerMoved = false;
   }
 
   void onExternalTapAt(Vector2 position) {
