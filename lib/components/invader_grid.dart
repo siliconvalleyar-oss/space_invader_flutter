@@ -6,18 +6,39 @@ import 'enemy.dart';
 
 enum GridDirection { right, down, left }
 
+/// Per-enemy state for swarm movement.
+class _SwarmState {
+  double phase;
+  double amplitude;
+  double driftSpeed;
+  double diveTimer;
+  double diveCooldown;
+  bool isDiving;
+  double baseX;
+
+  _SwarmState({
+    required this.phase,
+    required this.amplitude,
+    required this.driftSpeed,
+    required this.diveTimer,
+    this.diveCooldown = 0,
+    this.isDiving = false,
+    required this.baseX,
+  });
+}
+
 /// Manages the grid formation of enemy invaders with smooth continuous movement.
 class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   final int columns;
   final int rows;
   final List<Enemy> enemies = [];
+  final bool isSwarm;
 
   /// Whether enemy movement is frozen by a power-up.
   bool _frozen = false;
   bool get frozen => _frozen;
   set frozen(bool value) {
     _frozen = value;
-    // Propagate frozen state to all enemies for visual effect
     for (final enemy in enemies) {
       enemy.frozen = value;
     }
@@ -35,8 +56,10 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
   double _leftBound = 40;
   double _rightBound = 0;
 
-  /// For smooth movement: how long to spend moving down per phase
   static const double _downPhaseRatio = 0.25;
+
+  final Map<Enemy, _SwarmState> _swarmStates = {};
+  final Random _rng = Random();
 
   InvaderGrid({
     required this.columns,
@@ -44,6 +67,7 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     double moveInterval = 0.8,
     double fireInterval = 1.2,
     double stepSize = 20,
+    this.isSwarm = false,
   })  : _moveInterval = moveInterval,
         _fireInterval = fireInterval,
         _stepSize = stepSize;
@@ -54,6 +78,14 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     anchor = Anchor.center;
     _rightBound = gameRef.size.x - 40;
 
+    if (isSwarm) {
+      _initSwarm();
+    } else {
+      _initGrid();
+    }
+  }
+
+  void _initGrid() {
     final spacingX = 40.0;
     final spacingY = 35.0;
     final gridWidth = (columns - 1) * spacingX;
@@ -73,15 +105,41 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     }
   }
 
+  void _initSwarm() {
+    for (int i = 0; i < columns * rows; i++) {
+      final enemy = Enemy(row: 0, col: i, type: _rng.nextInt(3));
+      enemy.hitPoints = 1;
+      final x = 30 + _rng.nextDouble() * (gameRef.size.x - 60);
+      final y = -20 - _rng.nextDouble() * 200 - (i * 30);
+      enemy.position = Vector2(x, y);
+      enemy.visible = true;
+      enemies.add(enemy);
+      add(enemy);
+      _swarmStates[enemy] = _SwarmState(
+        phase: _rng.nextDouble() * 2 * pi,
+        amplitude: 20 + _rng.nextDouble() * 30,
+        driftSpeed: 25 + _rng.nextDouble() * 35,
+        diveTimer: 2.5 + _rng.nextDouble() * 3,
+        baseX: x,
+      );
+    }
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
     if (!gameRef.isGameStarted || gameRef.isGameOver) return;
 
-    // Freeze: don't move, but still allow firing
+    if (isSwarm) {
+      _updateSwarm(dt);
+    } else {
+      _updateGrid(dt);
+    }
+  }
+
+  void _updateGrid(double dt) {
     if (frozen) {
       _fireTimer += dt;
-      // While frozen, enemies fire more often (panic!)
       final activeEnemies = enemies.where((e) => e.visible).length;
       final totalEnemies = columns * rows;
       final speedFactor = 1.0 + (1.0 - activeEnemies / totalEnemies) * 0.5;
@@ -97,9 +155,8 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     final speedFactor = 1.0 + (1.0 - activeEnemies / totalEnemies) * 0.5;
     final adjustedInterval = _moveInterval / speedFactor;
 
-    // Calculate smooth velocities
-    final horizontalSpeed = _stepSize / adjustedInterval; // px/s
-    final downSpeed = _stepSize / (adjustedInterval * _downPhaseRatio); // faster descent
+    final horizontalSpeed = _stepSize / adjustedInterval;
+    final downSpeed = _stepSize / (adjustedInterval * _downPhaseRatio);
 
     switch (_currentDirection) {
       case GridDirection.right:
@@ -111,7 +168,6 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
           _moveTimer = 0.0;
         }
         break;
-
       case GridDirection.left:
         position.x -= horizontalSpeed * dt;
         if (_leftmostEnemyX() <= _leftBound) {
@@ -121,7 +177,6 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
           _moveTimer = 0.0;
         }
         break;
-
       case GridDirection.down:
         position.y += downSpeed * dt;
         _moveTimer += dt;
@@ -134,7 +189,6 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
         break;
     }
 
-    // Enemy firing (unchanged, with rate adjustment)
     _fireTimer += dt;
     if (_fireTimer >= _fireInterval / speedFactor) {
       _fireTimer = 0.0;
@@ -142,7 +196,61 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     }
   }
 
-  /// Fire a bullet from the lowest visible enemy in a random column.
+  void _updateSwarm(double dt) {
+    if (frozen) {
+      _fireTimer += dt;
+      if (_fireTimer >= _fireInterval * 0.5) {
+        _fireTimer = 0.0;
+        _fireRandomEnemy();
+      }
+      return;
+    }
+
+    final playerX = gameRef.player.position.x;
+
+    for (final enemy in enemies) {
+      if (!enemy.visible) continue;
+      final state = _swarmStates[enemy];
+      if (state == null) continue;
+
+      if (state.isDiving) {
+        state.diveCooldown -= dt;
+        final dx = playerX - enemy.position.x;
+        enemy.position.x += dx.sign * 180 * dt;
+        enemy.position.y += 120 * dt;
+        if (state.diveCooldown <= 0 || enemy.position.y > gameRef.size.y + 40) {
+          state.isDiving = false;
+          state.baseX = 30 + _rng.nextDouble() * (gameRef.size.x - 60);
+          enemy.position = Vector2(state.baseX, -20 - _rng.nextDouble() * 40);
+        }
+      } else {
+        state.phase += dt * 1.5;
+        state.diveCooldown += dt;
+        final sway = sin(state.phase) * 60 * dt;
+        enemy.position.x += sway;
+        enemy.position.y += state.driftSpeed * dt;
+        enemy.position.x = enemy.position.x.clamp(15, gameRef.size.x - 15);
+
+        if (enemy.position.y > gameRef.size.y + 30) {
+          state.baseX = 30 + _rng.nextDouble() * (gameRef.size.x - 60);
+          enemy.position = Vector2(state.baseX, -20 - _rng.nextDouble() * 50);
+        }
+
+        if (state.diveCooldown >= state.diveTimer) {
+          state.isDiving = true;
+          state.diveCooldown = 0;
+          state.diveTimer = 2.5 + _rng.nextDouble() * 3;
+        }
+      }
+    }
+
+    _fireTimer += dt;
+    if (_fireTimer >= _fireInterval * 0.6) {
+      _fireTimer = 0.0;
+      _fireRandomEnemy();
+    }
+  }
+
   void _fireFromLowestRow() {
     final columnLowest = <int, Enemy>{};
     for (final enemy in enemies) {
@@ -161,6 +269,13 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
       final globalPos = shooter.position + position;
       gameRef.spawnEnemyBullet(globalPos);
     }
+  }
+
+  void _fireRandomEnemy() {
+    final visible = enemies.where((e) => e.visible).toList();
+    if (visible.isEmpty) return;
+    final shooter = visible[_rng.nextInt(visible.length)];
+    gameRef.spawnEnemyBullet(shooter.position + position);
   }
 
   double _rightmostEnemyX() {
@@ -191,7 +306,16 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
     _lastHorizontal = GridDirection.right;
     _moveTimer = 0.0;
     _fireTimer = 0.0;
+    _swarmStates.clear();
 
+    if (isSwarm) {
+      _resetSwarm();
+    } else {
+      _resetGrid();
+    }
+  }
+
+  void _resetGrid() {
     final spacingX = 40.0;
     final spacingY = 35.0;
     final gridWidth = (columns - 1) * spacingX;
@@ -208,6 +332,24 @@ class InvaderGrid extends PositionComponent with HasGameRef<SpaceInvadersGame> {
           enemies[idx].visible = true;
         }
       }
+    }
+  }
+
+  void _resetSwarm() {
+    for (int i = 0; i < enemies.length; i++) {
+      final enemy = enemies[i];
+      enemy.hitPoints = 1;
+      final x = 30 + _rng.nextDouble() * (gameRef.size.x - 60);
+      final y = -20 - _rng.nextDouble() * 50;
+      enemy.position = Vector2(x, y);
+      enemy.visible = true;
+      _swarmStates[enemy] = _SwarmState(
+        phase: _rng.nextDouble() * 2 * pi,
+        amplitude: 20 + _rng.nextDouble() * 30,
+        driftSpeed: 25 + _rng.nextDouble() * 35,
+        diveTimer: 2.5 + _rng.nextDouble() * 3,
+        baseX: x,
+      );
     }
   }
 }

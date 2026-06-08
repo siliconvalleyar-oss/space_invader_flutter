@@ -29,6 +29,7 @@ class LevelConfig {
   final double stepSize;
   final bool isBossLevel;
   final int bossHp;
+  final bool isSwarmLevel;
 
   const LevelConfig({
     required this.level,
@@ -39,15 +40,16 @@ class LevelConfig {
     this.stepSize = 20,
     this.isBossLevel = false,
     this.bossHp = 10,
+    this.isSwarmLevel = false,
   });
 
   static const List<LevelConfig> levels = [
     LevelConfig(level: 1, gridColumns: 5, gridRows: 3, moveInterval: 0.8, fireInterval: 1.2, stepSize: 20),
     LevelConfig(level: 2, gridColumns: 6, gridRows: 3, moveInterval: 0.7, fireInterval: 1.0, stepSize: 22),
-    LevelConfig(level: 3, gridColumns: 6, gridRows: 4, moveInterval: 0.6, fireInterval: 0.9, stepSize: 24),
+    LevelConfig(level: 3, gridColumns: 7, gridRows: 4, moveInterval: 0.6, fireInterval: 0.8, stepSize: 24, isSwarmLevel: true),
     LevelConfig(level: 4, gridColumns: 7, gridRows: 4, moveInterval: 0.5, fireInterval: 0.8, stepSize: 26),
     LevelConfig(level: 5, gridColumns: 5, gridRows: 3, moveInterval: 0.7, fireInterval: 1.0, stepSize: 22, isBossLevel: true, bossHp: 15),
-    LevelConfig(level: 6, gridColumns: 6, gridRows: 4, moveInterval: 0.45, fireInterval: 0.7, stepSize: 28),
+    LevelConfig(level: 6, gridColumns: 7, gridRows: 4, moveInterval: 0.45, fireInterval: 0.7, stepSize: 28, isSwarmLevel: true),
     LevelConfig(level: 7, gridColumns: 7, gridRows: 5, moveInterval: 0.4, fireInterval: 0.6, stepSize: 30),
   ];
 }
@@ -61,11 +63,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   InvaderGrid? invaderGrid;
   Boss? boss;
   late Starfield starfield;
-
-  // Alpha maps for pixel-perfect collision
-  AlphaMap? _bulletAlpha;
-  final Map<Enemy, AlphaMap> _enemyAlphas = {};
-  AlphaMap? _bossAlpha;
 
   int score = 0;
   int lives = 3;
@@ -138,17 +135,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     player.priority = 50;
     player.visible = false;
     add(player);
-
-    // Precompute bullet alpha map for correct projectile collision
-    try {
-      final bulletSprite = await Sprite.load('disparo_de_nave_00.png');
-      _bulletAlpha = await AlphaMap.fromSprite(bulletSprite);
-    } catch (_) {
-      try {
-        final bulletSprite = await Sprite.load('bullet.png');
-        _bulletAlpha = await AlphaMap.fromSprite(bulletSprite);
-      } catch (_) {}
-    }
 
     // Score HUD
     scoreText = TextComponent(
@@ -275,25 +261,18 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
     if (invaderGrid != null) { remove(invaderGrid!); invaderGrid = null; }
     if (boss != null) { remove(boss!); boss = null; }
-    _enemyAlphas.clear();
-    _bossAlpha = null;
 
     if (config.isBossLevel) {
       boss = Boss(maxHp: config.bossHp);
       boss!.position = Vector2(size.x / 2, 60);
       boss!.priority = 40;
       add(boss!);
-      // Compute boss alpha map after load
-      Future.delayed(const Duration(milliseconds: 100), () async {
-        if (boss != null && boss!.sprite != null) {
-          _bossAlpha = await AlphaMap.fromSprite(boss!.sprite!);
-        }
-      });
       invaderGrid = InvaderGrid(
         columns: 3, rows: 2,
         moveInterval: config.moveInterval * 1.3,
         fireInterval: config.fireInterval * 1.5,
         stepSize: config.stepSize,
+        isSwarm: config.isSwarmLevel,
       );
       invaderGrid!.position = Vector2(size.x / 2, 140);
       invaderGrid!.priority = 30;
@@ -304,20 +283,12 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         moveInterval: config.moveInterval,
         fireInterval: config.fireInterval,
         stepSize: config.stepSize,
+        isSwarm: config.isSwarmLevel,
       );
       invaderGrid!.position = Vector2(size.x / 2, 80);
       invaderGrid!.priority = 30;
       add(invaderGrid!);
     }
-
-    // Compute enemy alpha maps after they load
-    Future.delayed(const Duration(milliseconds: 200), () async {
-      for (final enemy in (invaderGrid?.enemies ?? [])) {
-        if (enemy.sprite != null && !_enemyAlphas.containsKey(enemy)) {
-          _enemyAlphas[enemy] = await AlphaMap.fromSprite(enemy.sprite!);
-        }
-      }
-    });
 
     levelText?.text = 'LEVEL ${config.level}';
     starfield.setSpeedLevel(config.level);
@@ -399,24 +370,18 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void _checkCollisions() {
-    // Player bullets vs enemies (alpha collision)
+    // Player bullets vs enemies (expanded bounding box for reliability)
     for (final bullet in playerBullets.toList()) {
       if (!bullet.visible) continue;
       bool hit = false;
+      final r = bullet.toAbsoluteRect();
+      final bulletRect = Rect.fromLTRB(r.left - 6, r.top - 4, r.right + 6, r.bottom + 4);
 
       if (invaderGrid != null) {
         for (final enemy in invaderGrid!.enemies.toList()) {
           if (!enemy.visible) continue;
 
-          bool collision = false;
-          final enemyAlpha = _enemyAlphas[enemy];
-          if (enemyAlpha != null && _bulletAlpha != null) {
-            collision = CollisionUtils.checkAlphaCollision(bullet, _bulletAlpha!, enemy, enemyAlpha, step: 2);
-          } else {
-            collision = bullet.toAbsoluteRect().overlaps(enemy.toAbsoluteRect());
-          }
-
-          if (collision) {
+          if (bulletRect.overlaps(enemy.toAbsoluteRect())) {
             bullet.removeFromParent();
             playerBullets.remove(bullet);
             enemy.takeDamage();
@@ -435,14 +400,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       }
 
       if (!hit && boss != null && boss!.visible && bullet.visible) {
-        bool collision = false;
-        if (_bossAlpha != null && _bulletAlpha != null) {
-          collision = CollisionUtils.checkAlphaCollision(bullet, _bulletAlpha!, boss!, _bossAlpha!, step: 2);
-        } else {
-          collision = bullet.toAbsoluteRect().overlaps(boss!.toAbsoluteRect());
-        }
-
-        if (collision) {
+        if (bulletRect.overlaps(boss!.toAbsoluteRect())) {
           bullet.removeFromParent();
           playerBullets.remove(bullet);
           boss!.takeDamage();
@@ -764,7 +722,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
         if (enemy.visible) {
           enemy.visible = false;
           score += 10;
-          _spawnExplosion(enemy.position + invaderGrid!.position, const Color(0xFFFF6644));
+          _spawnExplosion(enemy.absolutePosition, const Color(0xFFFF6644));
         }
       }
     }
@@ -876,9 +834,6 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     } else if (boss != null) {
       boss!.visible = false;
     }
-
-    _enemyAlphas.clear();
-    _bossAlpha = null;
 
     levelText?.text = 'LEVEL ${config.level}';
     starfield.setSpeedLevel(config.level);
