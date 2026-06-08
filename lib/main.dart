@@ -62,43 +62,36 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
 
-          // Fire button overlay (right side)
+          // Fire button overlay (bottom-right, uses Listener to avoid pan gesture conflicts)
           Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: MediaQuery.of(context).size.width * 0.25,
-            child: GestureDetector(
-              onTapDown: (_) {
+            right: 20,
+            bottom: 20,
+            child: Listener(
+              onPointerDown: (_) {
                 _game.onExternalFireTap();
               },
               child: Container(
-                color: Colors.transparent,
-                child: Center(
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0x33FF4444),
-                      border: Border.all(
-                        color: const Color(0x66FF4444),
-                        width: 2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0x33FF4444),
-                          blurRadius: 12,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.flash_on,
-                      color: Color(0xAAFF4444),
-                      size: 30,
-                    ),
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0x33FF4444),
+                  border: Border.all(
+                    color: const Color(0x66FF4444),
+                    width: 2,
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0x33FF4444),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.flash_on,
+                  color: Color(0xAAFF4444),
+                  size: 30,
                 ),
               ),
             ),

@@ -63,7 +63,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   late Starfield starfield;
 
   // Alpha maps for pixel-perfect collision
-  AlphaMap? _playerAlpha;
+  AlphaMap? _bulletAlpha;
   final Map<Enemy, AlphaMap> _enemyAlphas = {};
   AlphaMap? _bossAlpha;
 
@@ -76,8 +76,15 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   static const double invulnerabilityDuration = 1.0;
 
   double fireTimer = 0.0;
-  static const double fireCooldown = 0.2;
+  double fireCooldown = 0.2;
   bool _gameJustStarted = true;
+
+  // Experience system
+  int xp = 0;
+  int playerLevel = 1;
+  static const int xpPerKill = 10;
+  static const int xpPerBossKill = 50;
+  static const List<int> xpThresholds = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500];
 
   // Power-up state
   double shieldTimer = 0.0;
@@ -96,6 +103,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   TextComponent? highScoreText;
   TextComponent? powerUpHud;
   TextComponent? gameOverText;
+  late XpBar xpBarBg;
+  late XpBar xpBarFill;
+  TextComponent? playerLevelText;
   bool isGameOver = false;
   bool isGameStarted = false;
 
@@ -129,12 +139,16 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     player.visible = false;
     add(player);
 
-    // Precompute player alpha map
+    // Precompute bullet alpha map for correct projectile collision
     try {
-      if (player.sprite != null) {
-        _playerAlpha = await AlphaMap.fromSprite(player.sprite!);
-      }
-    } catch (_) {}
+      final bulletSprite = await Sprite.load('disparo_de_nave_00.png');
+      _bulletAlpha = await AlphaMap.fromSprite(bulletSprite);
+    } catch (_) {
+      try {
+        final bulletSprite = await Sprite.load('bullet.png');
+        _bulletAlpha = await AlphaMap.fromSprite(bulletSprite);
+      } catch (_) {}
+    }
 
     // Score HUD
     scoreText = TextComponent(
@@ -181,6 +195,36 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       priority: 100,
     );
     add(powerUpHud!);
+
+    // XP Bar background
+    xpBarBg = XpBar(
+      position: Vector2(0, size.y - 14),
+      size: Vector2(size.x, 14),
+      fillPercent: 0.0,
+      isBackground: true,
+    );
+    xpBarBg.priority = 100;
+    add(xpBarBg);
+
+    // XP Bar fill
+    xpBarFill = XpBar(
+      position: Vector2(0, size.y - 14),
+      size: Vector2(size.x, 14),
+      fillPercent: 0.0,
+      isBackground: false,
+    );
+    xpBarFill.priority = 101;
+    add(xpBarFill);
+
+    // Player level text (over XP bar)
+    playerLevelText = TextComponent(
+      text: '',
+      textRenderer: _buildTextRenderer(Colors.amberAccent, 11),
+      position: Vector2(size.x - 8, size.y - 12),
+      anchor: Anchor.bottomRight,
+      priority: 102,
+    );
+    add(playerLevelText!);
 
     // Pre-create level (hidden behind menu) so everything is ready when game starts
     invaderGrid = null;
@@ -347,6 +391,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     if (spreadShotTimer > 0) {
       spreadShotTimer -= dt;
     }
+    // Fire cooldown timer
+    if (fireTimer > 0) fireTimer -= dt;
+
     // Clean up collected/expired power-ups
     _powerUps.removeWhere((p) => !p.visible);
 
@@ -371,8 +418,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
           bool collision = false;
           final enemyAlpha = _enemyAlphas[enemy];
-          if (enemyAlpha != null && _playerAlpha != null) {
-            collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, enemy, enemyAlpha, step: 2);
+          if (enemyAlpha != null && _bulletAlpha != null) {
+            collision = CollisionUtils.checkAlphaCollision(bullet, _bulletAlpha!, enemy, enemyAlpha, step: 2);
           } else {
             collision = bullet.toAbsoluteRect().overlaps(enemy.toAbsoluteRect());
           }
@@ -383,6 +430,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
             enemy.takeDamage();
             if (!enemy.visible) {
               score += 10;
+              _addXp(xpPerKill);
               _spawnExplosion(enemy.absolutePosition, const Color(0xFFFF6644));
               _playSound('explosion.wav');
               HapticFeedback.lightImpact();
@@ -396,8 +444,8 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
 
       if (!hit && boss != null && boss!.visible && bullet.visible) {
         bool collision = false;
-        if (_bossAlpha != null && _playerAlpha != null) {
-          collision = CollisionUtils.checkAlphaCollision(bullet, _playerAlpha!, boss!, _bossAlpha!, step: 2);
+        if (_bossAlpha != null && _bulletAlpha != null) {
+          collision = CollisionUtils.checkAlphaCollision(bullet, _bulletAlpha!, boss!, _bossAlpha!, step: 2);
         } else {
           collision = bullet.toAbsoluteRect().overlaps(boss!.toAbsoluteRect());
         }
@@ -408,6 +456,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
           boss!.takeDamage();
           if (!boss!.visible) {
             score += 50;
+            _addXp(xpPerBossKill);
             _spawnExplosion(boss!.absolutePosition, const Color(0xFFFFAA00));
             _spawnExplosion(boss!.absolutePosition + Vector2(-15, -10), const Color(0xFFFF6644));
             _spawnExplosion(boss!.absolutePosition + Vector2(15, 10), const Color(0xFFFFAA00));
@@ -460,6 +509,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
   }
 
   void _spawnPlayerBullet({bool playSound = true}) {
+    if (fireTimer > 0) return;
+    fireTimer = fireCooldown;
+
     if (playSound) {
       _playSound('shoot.wav');
       HapticFeedback.selectionClick();
@@ -630,6 +682,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     // Level already pre-created in onLoad(), no need to recreate
     // Just reset power-up state and game vars
     score = 0;
+    xp = 0;
+    playerLevel = 1;
+    fireCooldown = 0.2;
     lives = 3;
     invulnerabilityTimer = 0.0;
     fireTimer = 0.0;
@@ -637,6 +692,7 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     scoreText?.text = 'SCORE: 0';
     livesText?.text = 'LIVES: 3';
     levelText?.text = 'LEVEL 1';
+    _updateXpDisplay();
     // Ensure the grid is reset to level 0
     _resetLevel(0);
   }
@@ -676,6 +732,37 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     if (spreadShotTimer > 0) parts.add('🔥${spreadShotTimer.toStringAsFixed(1)}s');
     if (freezeTimer > 0) parts.add('❄️${freezeTimer.toStringAsFixed(1)}s');
     powerUpHud?.text = parts.isNotEmpty ? parts.join('  ') : '';
+  }
+
+  /// Add experience points and check for level up.
+  void _addXp(int amount) {
+    xp += amount;
+    while (playerLevel < xpThresholds.length && xp >= xpThresholds[playerLevel]) {
+      _levelUp();
+    }
+    _updateXpDisplay();
+  }
+
+  /// Handle player level up with bonuses.
+  void _levelUp() {
+    playerLevel++;
+    fireCooldown = (0.2 - (playerLevel - 1) * 0.012).clamp(0.1, 0.2);
+    _playSound('level_up.wav');
+    _showPowerUpLabel('LEVEL $playerLevel', const Color(0xFFFFCC00));
+    if (playerLevel % 3 == 0) {
+      lives++;
+      livesText?.text = 'LIVES: $lives';
+      _showPowerUpLabel('+1 UP', const Color(0xFF44FF44));
+    }
+  }
+
+  /// Update XP bar and player level text.
+  void _updateXpDisplay() {
+    final nextThreshold = playerLevel < xpThresholds.length ? xpThresholds[playerLevel] : xpThresholds.last;
+    final prevThreshold = xpThresholds[playerLevel - 1];
+    final progress = (xp - prevThreshold) / (nextThreshold - prevThreshold);
+    xpBarFill.fillPercent = progress.clamp(0.0, 1.0);
+    playerLevelText?.text = 'LV $playerLevel';
   }
 
   /// Destroy all enemies on screen instantly with explosions.
@@ -814,6 +901,9 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
       player.visible = true;
       invulnerabilityTimer = 0.0;
       score = 0;
+      xp = 0;
+      playerLevel = 1;
+      fireCooldown = 0.2;
       lives = 3;
       isGameOver = false;
       gameOverText?.text = '';
@@ -903,5 +993,44 @@ class SpaceInvadersGame extends FlameGame with KeyboardEvents {
     livesText?.position = Vector2(size.x - 120, 10);
     levelText?.position = Vector2(size.x / 2, 10);
     gameOverText?.position = Vector2(size.x / 2, size.y / 2 - 20);
+    xpBarBg.position = Vector2(0, size.y - 14);
+    xpBarBg.size = Vector2(size.x, 14);
+    xpBarFill.position = Vector2(0, size.y - 14);
+    xpBarFill.size = Vector2(size.x, 14);
+    playerLevelText?.position = Vector2(size.x - 8, size.y - 12);
+  }
+}
+
+/// XP bar rendered at bottom of screen showing progress to next level.
+class XpBar extends PositionComponent {
+  double fillPercent;
+  final bool isBackground;
+
+  XpBar({
+    required super.position,
+    required super.size,
+    required this.fillPercent,
+    required this.isBackground,
+  });
+
+  @override
+  void render(Canvas canvas) {
+    final rect = Rect.fromLTWH(0, 0, size.x, size.y);
+    if (isBackground) {
+      final bgPaint = Paint()
+        ..color = const Color(0xFF1A1A2E);
+      canvas.drawRect(rect, bgPaint);
+      final borderPaint = Paint()
+        ..color = const Color(0xFF334466)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1;
+      canvas.drawRect(rect, borderPaint);
+    } else {
+      if (fillPercent <= 0) return;
+      final barRect = Rect.fromLTWH(0, 0, size.x * fillPercent.clamp(0.0, 1.0), size.y);
+      final fillPaint = Paint()
+        ..color = const Color(0xFF6644CC);
+      canvas.drawRect(barRect, fillPaint);
+    }
   }
 }
